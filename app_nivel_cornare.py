@@ -1,12 +1,7 @@
 """
-App básica de Streamlit — Nivel de ríos/quebradas (CORNARE / MARCO)
+App mejorada de Streamlit — Nivel de ríos/quebradas (CORNARE / MARCO)
 --------------------------------------------------------------------
-Cada estudiante debe cambiar, como mínimo, el código de la estación
-en el sidebar. Los valores de fecha y calidad también son ajustables.
 
-Para correrla:
-    streamlit run app_nivel_cornare.py
-"""
 
 import requests
 import pandas as pd
@@ -16,13 +11,6 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ------------------------------------------------------------------
-# Coordenadas por defecto (Institución Universitaria Pascual Bravo)
-# Se usan solo si la API no trae la latitud/longitud de la estación.
-# ------------------------------------------------------------------
-LAT_DEFECTO = 6.2766
-LON_DEFECTO = -75.5901
-
 API_BASE_URL = "https://marco.cornare.gov.co/api/v1/estaciones"
 
 LLAVE_FECHA = "level_date"
@@ -30,8 +18,7 @@ LLAVE_VALOR = "level"
 CANDIDATOS_LAT = ["lat", "latitude", "latitud"]
 CANDIDATOS_LON = ["lng", "lon", "longitude", "longitud"]
 
-st.set_page_config(page_title="Nivel de estación — CORNARE", page_icon="🌊", layout="wide")
-
+st.set_page_config(page_title="Nivel de estación — Análisis Avanzado", page_icon="🌊", layout="wide")
 
 # ------------------------------------------------------------------
 # Funciones de consulta
@@ -40,8 +27,8 @@ def obtener_serie_nivel(codigo_estacion, desde, hasta, calidad=1, timeout=30):
     url = f"{API_BASE_URL}/{codigo_estacion}/nivel"
     params = {"desde": desde, "hasta": hasta, "calidad": calidad}
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
     }
     try:
         resp = requests.get(url, params=params, headers=headers, timeout=timeout, verify=False)
@@ -50,7 +37,6 @@ def obtener_serie_nivel(codigo_estacion, desde, hasta, calidad=1, timeout=30):
         return None, f"HTTP {resp.status_code}"
     except requests.exceptions.RequestException as e:
         return None, f"Error de red: {e}"
-
 
 def obtener_todas_las_paginas(datos_json, timeout=30):
     registros = list(datos_json.get("values", []))
@@ -67,11 +53,10 @@ def obtener_todas_las_paginas(datos_json, timeout=30):
         siguiente_url = pagina.get("next")
     return registros
 
-
-def detectar_coordenadas(datos_json):
-    """Busca lat/lon en las llaves raíz de la respuesta. Si no las encuentra, usa el valor por defecto."""
+def detectar_coordenadas(datos_json, lat_manual, lon_manual):
+    """Busca lat/lon en la API, si falla usa las coordenadas ingresadas manualmente."""
     if not isinstance(datos_json, dict):
-        return LAT_DEFECTO, LON_DEFECTO, False
+        return lat_manual, lon_manual, False
 
     lat = next((datos_json[k] for k in CANDIDATOS_LAT if k in datos_json), None)
     lon = next((datos_json[k] for k in CANDIDATOS_LON if k in datos_json), None)
@@ -81,11 +66,9 @@ def detectar_coordenadas(datos_json):
             return float(lat), float(lon), True
         except (TypeError, ValueError):
             pass
-    return LAT_DEFECTO, LON_DEFECTO, False
-
+    return lat_manual, lon_manual, False
 
 def calcular_indice_calidad(df):
-    """Índice simple (0-100) combinando completitud de la serie y proporción de outliers."""
     if df.empty or len(df) < 2:
         return 0.0, 0, 0
 
@@ -109,26 +92,32 @@ def calcular_indice_calidad(df):
     indice = (completitud * 0.7 + (1 - proporcion_outliers) * 0.3) * 100
     return round(indice, 1), int(huecos), int(es_outlier.sum())
 
+# ------------------------------------------------------------------
+# Sidebar — Parámetros de personalización de tu estación
+# ------------------------------------------------------------------
+st.sidebar.header("🛠️ Configuración de Estación")
+nombre_estudiante = st.sidebar.text_input("Investigador / Estudiante", "Tu Nombre")
+nombre_estacion = st.sidebar.text_input("Nombre de la Estación", "Río Medellín - Punto A")
+codigo_estacion = st.sidebar.text_input("Código de estación (CORNARE)", "42")
 
-# ------------------------------------------------------------------
-# Sidebar — parámetros de la consulta (editables por cada estudiante)
-# ------------------------------------------------------------------
-st.sidebar.header("Parámetros de tu consulta")
-nombre_estudiante = st.sidebar.text_input("Nombre del estudiante", "Tu Nombre Aquí")
-codigo_estacion = st.sidebar.text_input("Código de estación", "42")
+st.sidebar.subheader("Ubicación (Fallback si falla API)")
+lat_manual = st.sidebar.number_input("Latitud", value=6.2766, format="%.6f")
+lon_manual = st.sidebar.number_input("Longitud", value=-75.5901, format="%.6f")
+
+st.sidebar.header("📅 Parámetros Temporales")
 fecha_desde = st.sidebar.date_input("Desde", pd.to_datetime("2026-08-23")).strftime("%Y-%m-%d")
 fecha_hasta = st.sidebar.date_input("Hasta", pd.to_datetime("2026-08-30")).strftime("%Y-%m-%d")
 calidad = st.sidebar.selectbox("Calidad", [1, 0], index=0, help="1 = solo datos validados")
-consultar = st.sidebar.button("🔍 Consultar", type="primary")
+consultar = st.sidebar.button("🔍 Extraer Datos", type="primary")
 
-st.title("🌊 Nivel de ríos y quebradas — CORNARE")
-st.caption(f"Estudiante: **{nombre_estudiante}** · Estación: **{codigo_estacion}**")
+st.title(f"🌊 Análisis de Nivel Hídrico: {nombre_estacion}")
+st.caption(f"**Analista:** {nombre_estudiante} | **Código Sensor:** {codigo_estacion}")
 
 # ------------------------------------------------------------------
-# Consulta y procesamiento
+# Consulta, Procesamiento y Transformación de Datos
 # ------------------------------------------------------------------
 if consultar:
-    with st.spinner("Consultando la API..."):
+    with st.spinner("Consultando la API y procesando datos..."):
         datos_crudos, error = obtener_serie_nivel(codigo_estacion, fecha_desde, fecha_hasta, calidad)
 
     if error:
@@ -137,45 +126,68 @@ if consultar:
         registros = obtener_todas_las_paginas(datos_crudos)
 
         if not registros:
-            st.warning("No hay registros para esta estación y rango de fechas. Prueba otro código u otro rango.")
+            st.warning("No hay registros para esta estación y rango de fechas.")
         else:
+            # 1. Optimización de tipos de datos en Pandas
             df = pd.DataFrame(registros)
             df = df.rename(columns={LLAVE_FECHA: "fecha", LLAVE_VALOR: "nivel"})
             df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-            df["nivel"] = pd.to_numeric(df["nivel"], errors="coerce")
+            df["nivel"] = pd.to_numeric(df["nivel"], errors="coerce").astype(np.float32) # Optimización de memoria
             df = df.dropna(subset=["fecha", "nivel"]).sort_values("fecha").reset_index(drop=True)
 
-            lat, lon, coords_reales = detectar_coordenadas(datos_crudos)
+            # 2. Análisis Estadístico (Z-Score y Min-Max)
+            mean_nivel = df["nivel"].mean()
+            std_nivel = df["nivel"].std()
+            min_nivel = df["nivel"].min()
+            max_nivel = df["nivel"].max()
+            
+            # Estandarización y Normalización
+            df["z_score"] = ((df["nivel"] - mean_nivel) / std_nivel).astype(np.float32)
+            df["min_max_norm"] = ((df["nivel"] - min_nivel) / (max_nivel - min_nivel)).astype(np.float32)
+
+            lat, lon, coords_reales = detectar_coordenadas(datos_crudos, lat_manual, lon_manual)
             indice_calidad, huecos, n_outliers = calcular_indice_calidad(df)
 
-            # --- Métricas principales ---
+            # --- Métricas principales (Dashboard) ---
+            st.markdown("### 📊 Panel de Control y Calidad de Datos")
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Lecturas", len(df))
-            col2.metric("Nivel promedio", f"{df['nivel'].mean():.2f}")
-            col3.metric("Índice de calidad", f"{indice_calidad} / 100")
-            col4.metric("Outliers detectados", n_outliers)
+            col1.metric("Lecturas (N)", len(df))
+            col2.metric("Nivel Promedio", f"{mean_nivel:.2f} m")
+            col3.metric("Índice Calidad", f"{indice_calidad}%")
+            col4.metric("Outliers (IQR)", n_outliers)
 
-            # --- Gráfico de la serie ---
-            st.subheader("Serie de nivel")
-            st.line_chart(df.set_index("fecha")["nivel"])
+            # --- Vistas de Datos con Pestañas ---
+            tab1, tab2, tab3 = st.tabs(["📈 Serie de Tiempo", "🔬 Análisis Estadístico", "📍 Ubicación Geográfica"])
 
-            # --- Mapa de la estación ---
-            st.subheader("Ubicación de la estación")
-            if not coords_reales:
-                st.caption("La API no trajo latitud/longitud de la estación — se muestra el punto de partida (Pascual Bravo). Ajusta `CANDIDATOS_LAT` / `CANDIDATOS_LON` si conoces el nombre real de esas llaves.")
-            st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}), zoom=10)
+            with tab1:
+                st.subheader("Nivel Base del Agua")
+                st.line_chart(df.set_index("fecha")["nivel"], color="#1f77b4")
 
-            # --- Detalle de calidad ---
-            with st.expander("Detalle del índice de calidad"):
-                st.write(f"- Huecos de reporte detectados: **{huecos}**")
-                st.write(f"- Outliers (IQR + nivel negativo): **{n_outliers}** de {len(df)} lecturas")
-                st.write("El índice combina completitud de la serie (70%) y proporción de datos sin outliers (30%).")
+            with tab2:
+                st.subheader("Transformaciones de Datos")
+                col_chart1, col_chart2 = st.columns(2)
+                
+                with col_chart1:
+                    st.markdown("**Estandarización Z-Score** (Media=0, Desviación=1)")
+                    st.line_chart(df.set_index("fecha")["z_score"], color="#ff7f0e")
+                
+                with col_chart2:
+                    st.markdown("**Normalización Min-Max** (Escala 0 a 1)")
+                    st.line_chart(df.set_index("fecha")["min_max_norm"], color="#2ca02c")
+                    
+                st.caption("Estas transformaciones facilitan la comparación del comportamiento del caudal frente a otros fenómenos de diferentes escalas métricas.")
 
-            # --- Tabla y descarga ---
-            with st.expander("Ver datos crudos"):
+            with tab3:
+                st.subheader(f"Geolocalización: {nombre_estacion}")
+                if not coords_reales:
+                    st.info("Utilizando coordenadas manuales definidas en la barra lateral.")
+                st.map(pd.DataFrame({"lat": [lat], "lon": [lon]}), zoom=12)
+
+            # --- Exportación y detalles ---
+            st.divider()
+            with st.expander("Ver y exportar conjunto de datos procesado"):
                 st.dataframe(df, use_container_width=True)
-
-            csv = df.to_csv(index=False).encode("utf-8")
-            st.download_button("⬇️ Descargar CSV", csv, file_name=f"nivel_estacion_{codigo_estacion}.csv", mime="text/csv")
+                csv = df.to_csv(index=False).encode("utf-8")
+                st.download_button("⬇️ Descargar CSV Procesado", csv, file_name=f"{nombre_estacion.replace(' ', '_')}_datos.csv", mime="text/csv")
 else:
-    st.info("Ajusta los parámetros en el sidebar y presiona **Consultar**.")
+    st.info("Ajusta los parámetros en el panel izquierdo y haz clic en **Extraer Datos**.")
