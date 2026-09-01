@@ -1,8 +1,6 @@
 """
 App mejorada de Streamlit — Nivel de ríos/quebradas (CORNARE / MARCO)
---------------------------------------------------------------------
-Para correrla:
-    streamlit run app_nivel_cornare.py
+--------------------------------------------------------------------  
 """
 
 import requests
